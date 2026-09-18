@@ -18,6 +18,20 @@ PUNTOS_FAE = [
     {"id": "P4", "nombre": "Antenas FAE", "lat": -0.1460, "lon": -78.3107, "alt_m": 2550, "region": "Sierra"},
 ]
 
+# Puntos de referencia nacional para PRÓXIMOS PASOS / REPORTES / rutas Dijkstra.
+CIUDADES_ECUADOR = [
+    {"id": "UIO", "nombre": "Quito", "lat": -0.1807, "lon": -78.4678, "alt_m": 2850},
+    {"id": "GYE", "nombre": "Guayaquil", "lat": -2.1894, "lon": -79.8891, "alt_m": 4},
+    {"id": "CUE", "nombre": "Cuenca", "lat": -2.9006, "lon": -79.0045, "alt_m": 2550},
+    {"id": "MEC", "nombre": "Manta", "lat": -0.9500, "lon": -80.7300, "alt_m": 10},
+    {"id": "ESM", "nombre": "Esmeraldas", "lat": 0.9682, "lon": -79.6517, "alt_m": 10},
+    {"id": "LOJ", "nombre": "Loja", "lat": -3.9931, "lon": -79.2042, "alt_m": 2100},
+    {"id": "RIO", "nombre": "Riobamba", "lat": -1.6636, "lon": -78.6546, "alt_m": 2750},
+    {"id": "TEN", "nombre": "Tena", "lat": -0.9936, "lon": -77.8131, "alt_m": 510},
+    {"id": "LGO", "nombre": "Lago Agrio", "lat": 0.0842, "lon": -76.8894, "alt_m": 300},
+    {"id": "GPS", "nombre": "Galápagos (Pto. Ayora)", "lat": -0.7393, "lon": -90.3122, "alt_m": 6},
+]
+
 CONSTELACIONES = {
     "Starlink": {
         "planes": 24,

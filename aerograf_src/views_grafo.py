@@ -5,13 +5,13 @@ import streamlit as st
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from .graph import build_isl
+from .graph import build_isl, ruta_origen_destino
 from .orbital import haversine
 from .visualization import THEME, THEME_GEO, geo_layout
 
 
 def render_tab2(sats, constellation, regions, fae_points, metrics, predata,
-                 constellations=None):
+                 constellations=None, ciudades=None):
     st.markdown(
         "<div style='background:rgba(0,170,255,.04);border-left:3px solid #00aaff;"
         "padding:12px 16px;border-radius:0 8px 8px 0;margin-bottom:16px'>"
@@ -133,3 +133,42 @@ def render_tab2(sats, constellation, regions, fae_points, metrics, predata,
         )
         figure.update_xaxes(gridcolor="#1a1a1a", title_text="min")
         st.plotly_chart(figure, use_container_width=True)
+
+    if ciudades:
+        st.divider()
+        st.markdown("#### 🔗 Ruta origen → satélites → destino (Dijkstra)")
+        center_lat, center_lon = -1.5, -78.0
+        sats_ec = [sat for sat in sats if haversine(
+            center_lat, center_lon, sat["lat"], sat["lon"],
+        ) < 2800]
+        _, edges_ec = build_isl(sats_ec) if constellation["isl"] else ([], [])
+
+        nombres = [c["nombre"] for c in ciudades]
+        col_o, col_d, col_e, col_b = st.columns([2, 2, 1, 1])
+        with col_o:
+            origen_nombre = st.selectbox("Origen", nombres, index=0, key="ruta_origen")
+        with col_d:
+            destino_nombre = st.selectbox("Destino", nombres, index=min(1, len(nombres) - 1), key="ruta_destino")
+        with col_e:
+            min_el_ruta = st.slider("Elev. mín (°)", 5, 45, 10, 5, key="ruta_min_el")
+        with col_b:
+            st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+            calcular_ruta = st.button("CALCULAR RUTA", use_container_width=True)
+
+        if calcular_ruta:
+            origen = next(c for c in ciudades if c["nombre"] == origen_nombre)
+            destino = next(c for c in ciudades if c["nombre"] == destino_nombre)
+            if origen_nombre == destino_nombre:
+                st.warning("Elige un origen y un destino distintos.")
+            else:
+                resultado = ruta_origen_destino(sats_ec, edges_ec, origen, destino, min_el_ruta)
+                if resultado is None:
+                    st.error(
+                        f"No hay ruta satelital entre {origen_nombre} y {destino_nombre} "
+                        "en este instante con esa elevación mínima (prueba otro momento o baja la elevación)."
+                    )
+                else:
+                    st.success(" → ".join(resultado["path"]))
+                    m1, m2 = st.columns(2)
+                    m1.metric("Saltos", resultado["saltos"])
+                    m2.metric("Latencia total (ms)", resultado["latencia_ms"])

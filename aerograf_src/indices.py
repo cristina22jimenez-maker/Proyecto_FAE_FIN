@@ -153,28 +153,50 @@ def calcular_nivel3(constelaciones_tles: dict,
     resultado = {"regiones": {}, "puntos_fae": {}}
 
     for cname, tles in constelaciones_tles.items():
-        # ── Por región ────────────────────────────────────────────────────────
-        for rname, rdata in regiones.items():
-            d = ica_region(tles, rdata["lat"], rdata["lon"],
-                           t0, time_steps, min_el)
-            if rname not in resultado["regiones"]:
-                resultado["regiones"][rname] = {}
-            resultado["regiones"][rname][cname] = {
-                "ica":          d["ica"],
-                "icat":         d["icat"],
-                "vis_promedio": d["vis_promedio"],
-                "lat_promedio": d["lat_promedio"],
+        # Un solo propagate por instante, reutilizado para todas las
+        # regiones y puntos FAE (antes se repetía por cada uno: O(n) -> O(1)
+        # propagaciones extra, clave para catálogos reales con miles de sats).
+        serie_vis_region = {rname: [] for rname in regiones}
+        serie_lat_region = {rname: [] for rname in regiones}
+        serie_vis_punto = {p["id"]: [] for p in puntos_fae}
+        serie_lat_punto = {p["id"]: [] for p in puntos_fae}
+
+        for dt_min in time_steps:
+            t = t0 + datetime.timedelta(minutes=float(dt_min))
+            sats = propagate(tles, t)
+            for rname, rdata in regiones.items():
+                vis = sats_visibles(sats, rdata["lat"], rdata["lon"], min_el)
+                serie_vis_region[rname].append(len(vis))
+                if vis:
+                    serie_lat_region[rname].append(min(s["latencia_ms"] for s in vis))
+            for p in puntos_fae:
+                vis = sats_visibles(sats, p["lat"], p["lon"], min_el)
+                serie_vis_punto[p["id"]].append(len(vis))
+                if vis:
+                    serie_lat_punto[p["id"]].append(min(s["latencia_ms"] for s in vis))
+
+        for rname in regiones:
+            serie_vis = serie_vis_region[rname]
+            serie_lat = serie_lat_region[rname]
+            avg_vis = sum(serie_vis) / max(len(serie_vis), 1)
+            avg_lat = (sum(serie_lat) / len(serie_lat)) if serie_lat else None
+            ica = calcular_ica(avg_vis)
+            icat = calcular_icat(ica, avg_lat)
+            resultado["regiones"].setdefault(rname, {})[cname] = {
+                "ica":          ica,
+                "icat":         icat,
+                "vis_promedio": round(avg_vis, 1),
+                "lat_promedio": round(avg_lat, 2) if avg_lat else None,
             }
 
-        # ── Por punto FAE ─────────────────────────────────────────────────────
         for p in puntos_fae:
-            d   = ica_punto(tles, p, t0, time_steps, min_el)
             pid = p["id"]
-            if pid not in resultado["puntos_fae"]:
-                resultado["puntos_fae"][pid] = {}
-            resultado["puntos_fae"][pid][cname] = {
-                "ica":          d["ica"],
-                "vis_promedio": d["vis_promedio"],
+            serie_vis = serie_vis_punto[pid]
+            avg_vis = sum(serie_vis) / max(len(serie_vis), 1)
+            resultado["puntos_fae"].setdefault(pid, {})[cname] = {
+                "ica":          calcular_ica(avg_vis),
+                "vis_promedio": round(avg_vis, 1),
             }
 
     return resultado
+

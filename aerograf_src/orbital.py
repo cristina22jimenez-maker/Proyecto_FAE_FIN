@@ -28,6 +28,23 @@ GM_KM3  = 398_600.4418   # Constante gravitacional (km³/s²)
 C_KM_S  = 299_792.458    # Velocidad de la luz en vacío (km/s)
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# CACHE DE OBJETOS Satrec (parseo de TLE)
+# ═══════════════════════════════════════════════════════════════════════════════
+# Parsear un TLE (Satrec.twoline2rv) es ~12x más caro que el propio cálculo
+# SGP4. propagate() se llama una vez por instante temporal (hasta 19 veces
+# por serie), así que sin este cache se reparsea el mismo TLE una y otra vez.
+_SATREC_CACHE: dict[tuple[str, str], "Satrec"] = {}
+
+
+def _cached_satrec(l1: str, l2: str) -> "Satrec":
+    key = (l1, l2)
+    sat = _SATREC_CACHE.get(key)
+    if sat is None:
+        sat = Satrec.twoline2rv(l1, l2)
+        _SATREC_CACHE[key] = sat
+    return sat
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # CONVERSIONES GEOMÉTRICAS
 # ═══════════════════════════════════════════════════════════════════════════════
 def ecef_to_latlon(x: float, y: float, z: float) -> tuple:
@@ -298,7 +315,7 @@ def propagate(tles: list, t: datetime.datetime) -> list:
     sats = []
     for tle in tles:
         try:
-            sat     = Satrec.twoline2rv(tle["l1"], tle["l2"])
+            sat     = _cached_satrec(tle["l1"], tle["l2"])
             e, r, v = sat.sgp4(jd, fr)
             if e != 0:
                 continue

@@ -83,13 +83,21 @@ def compute_all_levels(
     t0: datetime.datetime | None = None,
     time_steps: list | None = None,
     script_dir: str = ".",
+    tles_by_constellation: dict | None = None,
+    tle_source: dict | None = None,
 ) -> dict:
-    """Calcula los tres niveles de analisis para todas las constelaciones."""
+    """Calcula los tres niveles de analisis para todas las constelaciones.
+
+    tles_by_constellation permite inyectar TLE reales (p. ej. KeepTrack API)
+    en lugar de los sinteticos por defecto; tle_source documenta el origen
+    de cada constelacion ("synthetic" o "real") en el resultado.
+    """
     t0 = t0 or datetime.datetime.now(datetime.timezone.utc)
     time_steps = time_steps or TIME_STEPS
-    tles_by_constellation = {
+    tles_by_constellation = tles_by_constellation or {
         name: load_constellation_tles(name, script_dir) for name in CONSTELACIONES
     }
+    tle_source = tle_source or {name: "synthetic" for name in CONSTELACIONES}
     if any(not tles for tles in tles_by_constellation.values()):
         return {}
 
@@ -132,9 +140,7 @@ def compute_all_levels(
     )
     return {
         "timestamp": t0.isoformat(),
-        "tle_source": {
-            name: "synthetic" for name in CONSTELACIONES
-        },
+        "tle_source": tle_source,
         "regiones": REGIONES,
         "puntos_fae": PUNTOS_FAE,
         "nivel1": nivel1,

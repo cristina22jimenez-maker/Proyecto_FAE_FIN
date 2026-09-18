@@ -13,7 +13,7 @@ def render_tab1(sats, edges, constellation, regions, fae_points, min_elevation,
     st.markdown("### ① NIVEL 1 — OBSERVAR")
     st.markdown(
         "<div style='background:linear-gradient(90deg,#001f17,#00100d);border-left:2px solid #00ff88;padding:10px 14px;margin:8px 0 18px;color:#b8ffe0;font-size:12px'>"
-        "¿Qué satélites pasan sobre Ecuador? Explora su posición, cobertura regional y enlaces con estaciones FAE.</div>",
+        "¿Qué satélites pasan sobre Ecuador? Explora su posición, cobertura regional y enlaces con puntos de referencia.</div>",
         unsafe_allow_html=True,
     )
     left, right = st.columns([3, 2])
@@ -161,7 +161,7 @@ def render_tab1(sats, edges, constellation, regions, fae_points, min_elevation,
             yaxis=dict(visible=False, range=[-0.05, 1.05]),
             annotations=[
                 dict(x=0.15, y=1.04, text="SATÉLITES", showarrow=False),
-                dict(x=0.85, y=1.04, text="ESTACIONES FAE", showarrow=False),
+                dict(x=0.85, y=1.04, text="PUNTOS DE REFERENCIA", showarrow=False),
             ],
         )
         st.plotly_chart(bipartite, use_container_width=True)

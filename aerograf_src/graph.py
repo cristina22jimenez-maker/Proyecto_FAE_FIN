@@ -16,12 +16,12 @@ import networkx as nx
 try:
     from .orbital import (
         dist3d, latency_ms, propagate,
-        gen_tles, haversine,
+        gen_tles, haversine, elevacion, latlon_to_ecef,
     )
 except ImportError:  # modo directo: archivo ejecutado desde la raíz
     from orbital import (
         dist3d, latency_ms, propagate,
-        gen_tles, haversine,
+        gen_tles, haversine, elevacion, latlon_to_ecef,
     )
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -123,7 +123,9 @@ def graph_metrics(G: nx.Graph) -> dict:
 
     comps = list(nx.connected_components(G))
     giant = max(comps, key=len) if comps else set()
-    Gc    = G.subgraph(giant)
+    # .copy() materializa un grafo plano: iterar una subgraph-view filtrada
+    # (SubGraph/FilterAdjacency) es varias veces más lento en NetworkX.
+    Gc    = G.subgraph(giant).copy()
     deg   = dict(G.degree())
 
     try:
@@ -198,6 +200,63 @@ def dijkstra(adj: list, n: int, src: int, dst: int) -> tuple:
     if not path or path[0] != src:
         return [], float("inf")
     return path, float(dist[dst])
+
+
+def ruta_origen_destino(sats: list, edges: list,
+                        origen: dict, destino: dict,
+                        min_el: float = 10.0) -> Optional[dict]:
+    """
+    Calcula la ruta más corta (Dijkstra) ORIGEN -> satélites -> DESTINO.
+
+    sats  : satélites candidatos ya propagados (p. ej. sobre Ecuador)
+    edges : aristas ISL entre esos satélites (formato de build_isl)
+    origen, destino : dicts con lat, lon, alt_m (opcional) y nombre/id
+
+    Se agregan dos nodos virtuales (origen y destino) conectados a los
+    satélites visibles desde cada uno (elevación ≥ min_el), y se corre
+    Dijkstra sobre ese grafo ampliado. Retorna None si no hay ruta.
+    """
+    n = len(sats)
+    origen_idx, destino_idx = n, n + 1
+    adj = [[] for _ in range(n + 2)]
+
+    for e in edges:
+        adj[e["a"]].append((e["b"], e["w_ms"]))
+        adj[e["b"]].append((e["a"], e["w_ms"]))
+
+    ec_o = latlon_to_ecef(origen["lat"], origen["lon"], origen.get("alt_m", 0) / 1000)
+    ec_d = latlon_to_ecef(destino["lat"], destino["lon"], destino.get("alt_m", 0) / 1000)
+
+    for i, sat in enumerate(sats):
+        el_o = elevacion(origen["lat"], origen["lon"], sat["lat"], sat["lon"], sat["alt_km"])
+        if el_o >= min_el:
+            w = latency_ms(dist3d(ec_o, sat["ecef"]))
+            adj[origen_idx].append((i, w))
+            adj[i].append((origen_idx, w))
+        el_d = elevacion(destino["lat"], destino["lon"], sat["lat"], sat["lon"], sat["alt_km"])
+        if el_d >= min_el:
+            w = latency_ms(dist3d(ec_d, sat["ecef"]))
+            adj[destino_idx].append((i, w))
+            adj[i].append((destino_idx, w))
+
+    path, costo_ms = dijkstra(adj, n + 2, origen_idx, destino_idx)
+    if not path:
+        return None
+
+    nombres = []
+    for idx in path:
+        if idx == origen_idx:
+            nombres.append(origen.get("nombre", "ORIGEN"))
+        elif idx == destino_idx:
+            nombres.append(destino.get("nombre", "DESTINO"))
+        else:
+            nombres.append(sats[idx].get("name", f"SAT-{idx}"))
+
+    return {
+        "path": nombres,
+        "saltos": len(path) - 1,
+        "latencia_ms": round(costo_ms, 2),
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

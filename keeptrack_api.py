@@ -93,12 +93,33 @@ def get_real_tles(constellation: str, api_key: str | None = None) -> list[dict]:
     Nunca lanza excepción: si falla (sin key, red, rate limit), retorna []
     para que el llamador pueda usar el TLE sintético como respaldo.
     """
+    tles, _ = get_real_tles_with_status(constellation, api_key)
+    return tles
+
+
+def get_real_tles_with_status(constellation: str, api_key: str | None = None) -> tuple[list[dict], str | None]:
+    """Como get_real_tles, pero además retorna un motivo de error legible
+    (o None si todo salió bien) para mostrar diagnóstico en la interfaz."""
     key = resolve_api_key(api_key)
     if not key:
-        return []
+        return [], "No se configuró ninguna API key de KeepTrack."
     try:
         catalog = fetch_catalog_brief(key)
-    except requests.RequestException:
-        return []
+    except requests.HTTPError as exc:
+        status = exc.response.status_code if exc.response is not None else None
+        if status in (401, 403):
+            return [], "API key de KeepTrack inválida o sin permisos (401/403)."
+        if status == 429:
+            return [], "Límite de solicitudes de KeepTrack excedido (429). Espera unos minutos."
+        return [], f"Error HTTP {status} al consultar KeepTrack."
+    except requests.Timeout:
+        return [], "KeepTrack no respondió a tiempo (timeout)."
+    except requests.RequestException as exc:
+        return [], f"No se pudo conectar con KeepTrack: {exc}"
     entries = filter_by_constellation(catalog, constellation)
-    return to_project_tles(entries)
+    if not entries:
+        return [], f"KeepTrack respondió, pero no hay satélites '{constellation}' en el catálogo."
+    tles = to_project_tles(entries)
+    if not tles:
+        return [], f"Las entradas de '{constellation}' no traían TLE utilizable (posible objeto solo-OMM)."
+    return tles, None

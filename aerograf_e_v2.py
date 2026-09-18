@@ -6,19 +6,30 @@ import os
 import streamlit as st
 
 from aerograf_src import (
+	CIUDADES_ECUADOR,
 	CONSTELACIONES,
 	PUNTOS_FAE,
 	REGIONES,
 	build_isl,
+	build_networkx,
+	compute_all_levels,
 	compute_graph_metrics,
+	gen_tles,
+	graph_metrics,
 	load_precomputed,
+	propagate,
 	propagate_constellation,
 )
 from aerograf_src.views_grafo import render_tab2
 from aerograf_src.views_indices import render_tab3
 from aerograf_src.views_observar import render_tab1
+from aerograf_src.views_datos_orbitales import render_tab_datos_orbitales
+from aerograf_src.views_pasos import render_tab_pasos
+from aerograf_src.views_reportes import render_tab_reportes
 from activos_reales import cargar_activos, render_tab_datos_reales
-from keeptrack_api import get_real_tles
+import celestrak_api
+import keeptrack_api
+from keeptrack_api import get_real_tles, get_real_tles_with_status
 
 
 st.set_page_config(
@@ -73,14 +84,23 @@ def render_sidebar():
 		show_isl = st.checkbox("Mostrar ISL", True)
 		show_coverage = st.checkbox("Mostrar cobertura", True)
 		st.divider()
-		use_real_tles = st.checkbox("Usar TLEs reales (KeepTrack API)", False)
+		st.markdown("### 🛰️ Fuente de datos")
+		data_source = st.radio(
+			"Fuente", ["Sintético (simulación)", "KeepTrack", "CelesTrak"], index=0,
+		)
 		api_key_input = ""
-		if use_real_tles:
+		if data_source == "KeepTrack":
 			api_key_input = st.text_input(
 				"API key KeepTrack", type="password",
 				help="Gratis en keeptrack.space (menú de usuario > API Key). "
 				"Se puede definir también en st.secrets o la variable de entorno KEEPTRACK_API_KEY.",
 			)
+			if api_key_input:
+				st.caption(f"Clave: {'•' * max(0, len(api_key_input) - 4)}{api_key_input[-4:]}")
+		refresh_clicked = st.button("🔄 ACTUALIZAR DATOS", use_container_width=True)
+		if st.session_state.get("last_update"):
+			st.caption(f"Última actualización:  \n{st.session_state['last_update']}")
+			st.caption(f"Activos cargados:  \n{st.session_state.get('activos_cargados', 0):,}")
 		st.divider()
 		with st.expander("ICA e ICAT"):
 			st.markdown("ICA mide cobertura promedio. ICAT pondera ICA por latencia.")
@@ -92,7 +112,7 @@ def render_sidebar():
 			"y escenarios de constelaciones LEO. "
 			"Los datos del registro no representan seguimiento en tiempo real."
 		)
-	return name, offset, elevation, show_isl, show_coverage, use_real_tles, api_key_input
+	return name, offset, elevation, show_isl, show_coverage, data_source, api_key_input, refresh_clicked
 
 
 def render_header():
@@ -111,12 +131,19 @@ def render_header():
 	""", unsafe_allow_html=True)
 
 
-def render_comparison(predata, offset):
+def render_comparison(predata, offset, tles_by_constellation=None):
 	st.markdown("#### Comparación simultánea de constelaciones")
 	columns = st.columns(3)
 	for column, (name, config) in zip(columns, CONSTELACIONES.items()):
 		with column:
-			metrics = compute_graph_metrics(name, offset)
+			if tles_by_constellation:
+				from aerograf_src.data import satellites_over_ecuador
+				now = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=offset)
+				sats_c = satellites_over_ecuador(propagate(tles_by_constellation[name], now))
+				edges_c = build_isl(sats_c)[1] if config["isl"] else []
+				metrics = {**graph_metrics(build_networkx(sats_c, edges_c)), "sats_ec": len(sats_c)}
+			else:
+				metrics = compute_graph_metrics(name, offset)
 			st.markdown(f"**{name}**  \n{config['inc']}° · {config['alt_km']} km")
 			st.metric("Sats sobre Ecuador", metrics.get("sats_ec", 0))
 			st.metric("ISL modelados", metrics.get("aristas", 0))
@@ -209,9 +236,28 @@ PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 ACTIVOS_CSV = os.path.join(PROJECT_DIR, "activos_espaciales.csv")
 activos_reales_df = cargar_activos(ACTIVOS_CSV)
 
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _compute_real_predata(tles_by_constellation, tle_source):
+	"""Recalcula ICA/ICAT/metricas para las 3 constelaciones con TLE reales.
+
+	Cacheado 1h (misma vida util que el catalogo de KeepTrack) porque
+	recorrer el catalogo real completo para las 19 muestras temporales
+	es costoso; no debe repetirse en cada rerun de Streamlit.
+	"""
+	return compute_all_levels(
+		tles_by_constellation=tles_by_constellation, tle_source=tle_source,
+	)
+
+
 render_header()
-name, offset, elevation, show_isl, show_coverage, use_real_tles, api_key_input = render_sidebar()
+name, offset, elevation, show_isl, show_coverage, data_source, api_key_input, refresh_clicked = render_sidebar()
 config = {**CONSTELACIONES[name], "name": name}
+
+if refresh_clicked:
+	keeptrack_api.fetch_catalog_brief.clear()
+	celestrak_api.fetch_group_tle.clear()
+	_compute_real_predata.clear()
 
 with st.spinner("Cargando datos orbitales y métricas..."):
 	predata = load_precomputed(PROJECT_DIR)
@@ -219,17 +265,61 @@ with st.spinner("Cargando datos orbitales y métricas..."):
 	edges = build_isl(sats)[1] if config["isl"] else []
 	metrics = compute_graph_metrics(name, offset)
 
-real_tles_notice = None
-if use_real_tles:
-	from aerograf_src.orbital import propagate as _propagate
-	real_tles = get_real_tles(name, api_key_input or None)
+# tles_by_constellation siempre queda poblado (real o sintetico) para que
+# la pestaña DATOS ORBITALES tenga catalogo que mostrar en cualquier modo.
+tles_by_constellation, tle_source, missing, source_errors = {}, {}, [], {}
+for cname in CONSTELACIONES:
+	real_tles, error_reason = [], None
+	if data_source == "KeepTrack":
+		real_tles, error_reason = get_real_tles_with_status(cname, api_key_input or None)
+	elif data_source == "CelesTrak":
+		real_tles, error_reason = celestrak_api.get_real_tles_with_status(cname)
 	if real_tles:
-		now = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=offset)
-		sats = _propagate(real_tles, now)
-		edges = build_isl(sats)[1] if config["isl"] else []
-		real_tles_notice = f"Usando {len(sats)} TLEs reales de KeepTrack para {name}."
+		tles_by_constellation[cname] = real_tles
+		tle_source[cname] = "real"
 	else:
-		real_tles_notice = "No se pudieron obtener TLEs reales (revisa la API key). Mostrando datos sintéticos."
+		tles_by_constellation[cname] = gen_tles(CONSTELACIONES[cname])
+		tle_source[cname] = "synthetic"
+		if data_source != "Sintético (simulación)":
+			missing.append(cname)
+			if error_reason:
+				source_errors[cname] = error_reason
+
+real_tles_notice = None
+if data_source != "Sintético (simulación)":
+	from aerograf_src.data import satellites_over_ecuador
+
+	if tle_source.get(name) == "real":
+		now = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=offset)
+		with st.spinner(f"Propagando TLEs reales de {name}..."):
+			all_sats = propagate(tles_by_constellation[name], now)
+			# Constelaciones reales tienen miles de sats: limitar al radio de
+			# analisis de Ecuador evita el costo O(n^2) de build_isl sobre todos.
+			sats = satellites_over_ecuador(all_sats)
+			edges = build_isl(sats)[1] if config["isl"] else []
+			metrics = {**graph_metrics(build_networkx(sats, edges)), "sats_ec": len(sats)}
+
+		with st.spinner("Calculando ICA/ICAT e histórico con datos reales (usa cache de 1h)..."):
+			real_predata = _compute_real_predata(tles_by_constellation, tle_source)
+		if real_predata:
+			predata = real_predata
+
+		st.session_state["last_update"] = datetime.datetime.now(datetime.timezone.utc).strftime("%d/%m/%Y %H:%M UTC")
+		st.session_state["activos_cargados"] = sum(len(t) for t in tles_by_constellation.values())
+
+		notice = (
+			f"Usando TLEs reales de {data_source} para {name}: {len(all_sats)} sats "
+			f"en la constelación, {len(sats)} sobre el radio de análisis de Ecuador. "
+			"Todas las pestañas (CARACTERIZAR, CONCIENTIZAR, COMPARACIÓN) usan estos datos."
+		)
+		if missing:
+			notice += f" (Sin datos reales para: {', '.join(missing)}; se usa escenario sintético en esas.)"
+		real_tles_notice = ("ok", notice)
+	else:
+		real_tles_notice = (
+			"warn",
+			source_errors.get(name, f"No se pudieron obtener TLEs reales de {data_source} para {name}."),
+		)
 
 kpi = st.columns(6)
 kpi[0].metric("Sats totales", len(sats))
@@ -238,31 +328,41 @@ kpi[2].metric("ISL", metrics.get("aristas", 0))
 kpi[3].metric("Grado promedio", metrics.get("grado_promedio", 0))
 kpi[4].metric("Clustering", metrics.get("clustering", 0))
 kpi[5].metric("Componentes", metrics.get("componentes", 0))
+
+if real_tles_notice:
+	status, message = real_tles_notice
+	(st.success if status == "ok" else st.warning)(message)
 st.divider()
 
-tab0, tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab_orb, tab1, tab2, tab_pasos, tab3, tab_rep, tab4, tab5, tab0 = st.tabs([
+	"🛰️ DATOS ORBITALES",
+	"① OBSERVAR", "② CARACTERIZAR", "④ PRÓXIMOS PASOS", "③ CONCIENTIZAR",
+	"📄 REPORTES", "🔄 COMPARACIÓN", "📋 METODOLOGÍA",
 	"⓪ DATOS REALES",
-	"① OBSERVAR", "② CARACTERIZAR", "③ CONCIENTIZAR",
-	"🔄 COMPARACIÓN", "📋 METODOLOGÍA",
 ])
 
-with tab0:
-	render_tab_datos_reales(activos_reales_df)
+with tab_orb:
+	render_tab_datos_orbitales(tles_by_constellation, tle_source,
+								st.session_state.get("last_update"), data_source)
 with tab1:
-	if real_tles_notice:
-		(st.success if use_real_tles and "reales" in real_tles_notice.split(".")[0] else st.warning)(real_tles_notice)
 	render_tab1(sats, edges, config, REGIONES, PUNTOS_FAE, elevation,
 				show_isl, show_coverage, predata, offset)
 with tab2:
 	render_tab2(sats, config, REGIONES, PUNTOS_FAE, metrics, predata,
-				constellations=CONSTELACIONES)
+				constellations=CONSTELACIONES, ciudades=CIUDADES_ECUADOR)
+with tab_pasos:
+	render_tab_pasos(tles_by_constellation.get(name, []), CIUDADES_ECUADOR, name, config["color"])
 with tab3:
 	render_tab3(predata.get("nivel3", {}), name, REGIONES, PUNTOS_FAE,
 				CONSTELACIONES)
+with tab_rep:
+	render_tab_reportes(tles_by_constellation, CIUDADES_ECUADOR + PUNTOS_FAE, list(CONSTELACIONES))
 with tab4:
-	render_comparison(predata, offset)
+	render_comparison(predata, offset, tles_by_constellation)
 with tab5:
 	render_methodology()
+with tab0:
+	render_tab_datos_reales(activos_reales_df)
 
 st.divider()
 st.caption("AEROGRAF-E · SGP4 + NetworkX + Plotly · Fuerza Aérea Ecuatoriana · 2026")
