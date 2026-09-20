@@ -131,17 +131,24 @@ def render_tab3(data, constellation_name, regions, fae_points, constellations):
         font=dict(color="#cccccc"),
         legend=dict(
             orientation="v", x=1.01, y=1,
-            bgcolor="rgba(0,0,0,0.5)",
-            bordercolor="#2a2a2a", font=dict(size=11),
+            bgcolor="rgba(0,0,0,0.6)",
+            bordercolor="#444444", borderwidth=1,
+            font=dict(size=13, color="#ffffff"),
         ),
         yaxis=dict(
-            title="ICA (%)", range=[0, 120],
-            gridcolor="#1a1a1a", gridwidth=1, griddash="dot",
-            zeroline=False, tickfont=dict(size=10, color="#aaaaaa"),
+            title=dict(text="ICA (%)", font=dict(size=13, color="#ffffff")),
+            range=[0, 120],
+            gridcolor="#2a2a2a", gridwidth=1, griddash="dot",
+            zeroline=False,
+            tickfont=dict(size=12, color="#ffffff"),
+            tickcolor="#ffffff",
+            linecolor="#444444", linewidth=1,
         ),
         xaxis=dict(
-            gridcolor="#1a1a1a",
-            tickfont=dict(size=10, color="#cccccc"),
+            gridcolor="#2a2a2a",
+            tickfont=dict(size=12, color="#ffffff"),
+            tickcolor="#ffffff",
+            linecolor="#444444", linewidth=1,
         ),
         hovermode="x unified",
     )
@@ -173,33 +180,41 @@ def render_tab3(data, constellation_name, regions, fae_points, constellations):
         textfont=dict(size=14, color="#ffffff", family="sans-serif"),
         hovertemplate="%{y} · %{x}<br>ICA: <b>%{z:.1f}%</b><extra></extra>",
         colorbar=dict(
-            title=dict(text="ICA (%)", font=dict(size=11, color="#cccccc")),
-            tickfont=dict(size=9, color="#aaaaaa"),
-            thickness=16, len=0.9,
+            title=dict(text="ICA (%)", font=dict(size=13, color="#ffffff")),
+            tickfont=dict(size=12, color="#ffffff"),
+            thickness=18, len=0.9,
             tickvals=[0, 25, 50, 75, 100],
             bgcolor="rgba(0,0,0,0)",
-            bordercolor="#2a2a2a",
+            bordercolor="#444444",
+            borderwidth=1,
         ),
         xgap=2, ygap=2,
     ))
     figure.update_layout(
         title=dict(
             text="🔥 Heatmap ICA — región × constelación",
-            font=dict(size=13, color="#ffffff"), x=0.5, xanchor="center",
+            font=dict(size=15, color="#ffffff", family="sans-serif"),
+            x=0.0, xanchor="left",
         ),
         paper_bgcolor="#0a0a0a",
         plot_bgcolor="#0a0a0a",
-        font=dict(color="#cccccc"),
-        height=360,
-        margin=dict(l=110, r=100, t=50, b=30),
+        font=dict(color="#ffffff"),
+        height=380,
+        margin=dict(l=120, r=110, t=60, b=50),
     )
     figure.update_xaxes(
-        showgrid=False, ticks="", side="bottom",
-        tickfont=dict(size=12, color="#cccccc"),
+        showgrid=False, ticks="outside", ticklen=5,
+        side="bottom",
+        tickfont=dict(size=13, color="#ffffff", family="sans-serif"),
+        tickcolor="#ffffff",
+        linecolor="#444444", linewidth=1,
     )
     figure.update_yaxes(
-        showgrid=False, ticks="", autorange="reversed",
-        tickfont=dict(size=11, color="#cccccc"),
+        showgrid=False, ticks="outside", ticklen=5,
+        autorange="reversed",
+        tickfont=dict(size=13, color="#ffffff", family="sans-serif"),
+        tickcolor="#ffffff",
+        linecolor="#444444", linewidth=1,
     )
     st.plotly_chart(figure, use_container_width=True, config=CHART_CONFIG)
 
@@ -258,16 +273,18 @@ def render_tab3(data, constellation_name, regions, fae_points, constellations):
             itemsizing="constant",
         ),
         yaxis=dict(
-            title="Latencia (ms)",
-            gridcolor="#1a1a1a",
-            gridwidth=1,
-            griddash="dot",
+            title=dict(text="Latencia (ms)", font=dict(size=13, color="#ffffff")),
+            gridcolor="#2a2a2a", gridwidth=1, griddash="dot",
             zeroline=False,
-            tickfont=dict(size=10, color="#aaaaaa"),
+            tickfont=dict(size=12, color="#ffffff"),
+            tickcolor="#ffffff",
+            linecolor="#444444", linewidth=1,
         ),
         xaxis=dict(
-            gridcolor="#1a1a1a",
-            tickfont=dict(size=10, color="#cccccc"),
+            gridcolor="#2a2a2a",
+            tickfont=dict(size=12, color="#ffffff", family="Courier New, monospace"),
+            tickcolor="#ffffff",
+            linecolor="#444444", linewidth=1,
         ),
     )
     # Agregar entradas manuales de leyenda para Mediana y Media
