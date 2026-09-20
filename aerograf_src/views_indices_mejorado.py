@@ -93,114 +93,120 @@ def render_tab3(data, constellation_name, regions, fae_points, constellations):
     st.dataframe(pd.DataFrame(rows).set_index("Región"), use_container_width=True)
 
     st.markdown("#### ICA comparativo por región")
-    # Colores fijos según imagen de referencia
-    BAR_COLORS = {
-        "Starlink": "#2196f3",   # azul
-        "OneWeb":   "#69f0ae",   # verde lima
-        "Kuiper":   "#ffeb3b",   # amarillo
-    }
     figure = go.Figure()
     for name, config in constellations.items():
         values = [regional.get(region, {}).get(name, {}).get("ica", 0)
                   for region in regions]
-        bar_color = BAR_COLORS.get(name, config["color"])
         figure.add_trace(go.Bar(
             name=name, x=list(regions), y=values,
-            marker=dict(color=bar_color, line=dict(width=0), opacity=1.0),
+            marker=dict(color=config["color"], line=dict(width=0),
+                        opacity=0.92),
             text=[f"{value:.0f}" for value in values],
-            textposition="outside",
-            textfont=dict(size=11, color="#ffffff", family="sans-serif"),
+            textposition="outside", textfont=dict(size=10, color="#cccccc"),
             hovertemplate="%{x}<br>ICA %{y:.1f}<extra>%{fullData.name}</extra>",
         ))
-    figure.add_hline(
-        y=70, line_dash="dash", line_color="#ef5350", line_width=1.5,
-        annotation_text="Umbral operacional (70)",
-        annotation_font_color="#ef9a9a",
-        annotation_position="top right",
-    )
-    figure.update_layout(
-        title=dict(
-            text="ICA comparativo por región",
-            font=dict(size=13, color="#ffffff"), x=0, xanchor="left",
-        ),
-        paper_bgcolor="#0a0a0a",
-        plot_bgcolor="#0a0a0a",
-        barmode="group", bargap=0.28, bargroupgap=0.05,
-        height=400,
-        margin=dict(l=60, r=30, t=50, b=60),
-        font=dict(color="#cccccc"),
-        legend=dict(
-            orientation="v", x=1.01, y=1,
-            bgcolor="rgba(0,0,0,0.5)",
-            bordercolor="#2a2a2a", font=dict(size=11),
-        ),
-        yaxis=dict(
-            title="ICA (%)", range=[0, 120],
-            gridcolor="#1a1a1a", gridwidth=1, griddash="dot",
-            zeroline=False, tickfont=dict(size=10, color="#aaaaaa"),
-        ),
-        xaxis=dict(
-            gridcolor="#1a1a1a",
-            tickfont=dict(size=10, color="#cccccc"),
-        ),
-        hovermode="x unified",
-    )
+    figure.add_hline(y=70, line_dash="dash", line_color="#ff5555",
+                     line_width=1, annotation_text="Umbral operacional (70)",
+                     annotation_font_color="#ff8888")
+    apply_xy_theme(figure, height=380, barmode="group", bargap=0.28,
+                   yaxis_title="ICA (%)", yaxis_range=[0, 118],
+                   hovermode="x unified")
     st.plotly_chart(figure, use_container_width=True, config=CHART_CONFIG)
 
     st.markdown("#### 🔥 Heatmap ICA — región × constelación")
     region_names = list(regions)
     constellation_names = list(constellations)
-    # Paleta verde → amarillo → rojo (igual a la imagen de referencia)
-    HEATMAP_COLORSCALE = [
-        [0.00, "#b71c1c"],   # rojo oscuro  → ICA muy bajo
-        [0.20, "#e53935"],   # rojo
-        [0.40, "#fdd835"],   # amarillo     → ICA medio
-        [0.60, "#c8e6c9"],   # verde muy claro
-        [0.80, "#43a047"],   # verde
-        [1.00, "#1b5e20"],   # verde oscuro → ICA alto
+
+    # ── Paleta semáforo perceptualmente uniforme ─────────────────────────────
+    COLORSCALE_ICA_MEJORADO = [
+        [0.00, "#c0392b"],
+        [0.25, "#e74c3c"],
+        [0.40, "#e67e22"],
+        [0.55, "#f1c40f"],
+        [0.70, "#2ecc71"],
+        [0.85, "#27ae60"],
+        [1.00, "#1a5e35"],
     ]
+
+    def _calidad_label(v: float) -> str:
+        if v >= 80:   return "Excelente"
+        if v >= 55:   return "Bueno"
+        if v >= 35:   return "Regular"
+        return "Bajo"
+
+    def _mini_bar(v: float) -> str:
+        b = int(round(v / 10))
+        return "█" * b + "░" * (10 - b)
+
+    import numpy as np
     z = [[regional.get(region, {}).get(cname, {}).get("ica", 0)
           for cname in constellation_names]
          for region in region_names]
+    z_arr = [[regional.get(region, {}).get(cname, {}).get("ica", 0)
+              for cname in constellation_names]
+             for region in region_names]
+
+    # Promedio por constelación para badge en eje X.
+    promedios = {
+        cname: float(sum(regional.get(r, {}).get(cname, {}).get("ica", 0)
+                         for r in region_names) / max(len(region_names), 1))
+        for cname in constellation_names
+    }
+
+    # Texto enriquecido: valor + mini-barra unicode.
+    text_matrix = [
+        [f"{z_arr[ri][ci]:.0f}%  {_mini_bar(z_arr[ri][ci])}"
+         for ci in range(len(constellation_names))]
+        for ri in range(len(region_names))
+    ]
+
+    # Tooltip enriquecido.
+    hover_matrix = [
+        [
+            f"<b>{constellation_names[ci]}</b> · {region_names[ri]}<br>"
+            f"ICA: <b>{z_arr[ri][ci]:.1f}%</b><br>"
+            f"Calidad: <b>{_calidad_label(z_arr[ri][ci])}</b><br>"
+            f"Promedio constelación: {promedios[constellation_names[ci]]:.1f}%"
+            for ci in range(len(constellation_names))
+        ]
+        for ri in range(len(region_names))
+    ]
+
+    # Etiquetas eje X con promedio badge.
+    xtick_labels = [
+        f"{cname}  (x̄ {promedios[cname]:.0f}%)"
+        for cname in constellation_names
+    ]
+
     figure = go.Figure(go.Heatmap(
-        z=z,
-        x=constellation_names,
+        z=z_arr,
+        x=xtick_labels,
         y=region_names,
-        colorscale=HEATMAP_COLORSCALE,
-        zmin=0, zmax=100,
-        text=[[f"{value:.0f}" for value in row] for row in z],
+        text=text_matrix,
+        hovertext=hover_matrix,
+        hoverinfo="text",
         texttemplate="%{text}",
-        textfont=dict(size=14, color="#ffffff", family="sans-serif"),
-        hovertemplate="%{y} · %{x}<br>ICA: <b>%{z:.1f}%</b><extra></extra>",
+        textfont=dict(size=12, color="white", family="Courier New, monospace"),
+        colorscale=COLORSCALE_ICA_MEJORADO,
+        zmin=0, zmax=100,
         colorbar=dict(
             title=dict(text="ICA (%)", font=dict(size=11, color="#cccccc")),
             tickfont=dict(size=9, color="#aaaaaa"),
-            thickness=16, len=0.9,
+            thickness=16,
+            len=0.85,
             tickvals=[0, 25, 50, 75, 100],
+            ticktext=["0 — Nulo", "25 — Bajo", "50 — Regular", "75 — Bueno", "100 — Óptimo"],
             bgcolor="rgba(0,0,0,0)",
             bordercolor="#2a2a2a",
         ),
-        xgap=2, ygap=2,
+        xgap=4,
+        ygap=4,
     ))
-    figure.update_layout(
-        title=dict(
-            text="🔥 Heatmap ICA — región × constelación",
-            font=dict(size=13, color="#ffffff"), x=0.5, xanchor="center",
-        ),
-        paper_bgcolor="#0a0a0a",
-        plot_bgcolor="#0a0a0a",
-        font=dict(color="#cccccc"),
-        height=360,
-        margin=dict(l=110, r=100, t=50, b=30),
-    )
-    figure.update_xaxes(
-        showgrid=False, ticks="", side="bottom",
-        tickfont=dict(size=12, color="#cccccc"),
-    )
-    figure.update_yaxes(
-        showgrid=False, ticks="", autorange="reversed",
-        tickfont=dict(size=11, color="#cccccc"),
-    )
+    apply_xy_theme(figure, height=360, margin=dict(l=110, r=130, t=40, b=20))
+    figure.update_xaxes(showgrid=False, ticks="", side="top",
+                        tickfont=dict(size=11, color="#cccccc"))
+    figure.update_yaxes(showgrid=False, ticks="", autorange="reversed",
+                        tickfont=dict(size=11, color="#cccccc"))
     st.plotly_chart(figure, use_container_width=True, config=CHART_CONFIG)
 
     st.markdown("#### ICA en puntos FAE")
@@ -216,69 +222,17 @@ def render_tab3(data, constellation_name, regions, fae_points, constellations):
 
     st.markdown("#### 📦 Distribución de latencia por punto FAE")
     figure = go.Figure()
-    BOX_COLOR      = "#00897b"   # verde azulado de las cajas
-    BOX_FILL       = "#00695c"   # relleno ligeramente más oscuro
-    MEDIAN_COLOR   = "#ffffff"   # mediana blanca sólida
-    MEAN_COLOR     = "#ffdd00"   # media amarilla punteada
-    OUTLIER_COLOR  = "#b2dfdb"   # outliers en verde claro
     for i, point in enumerate(fae_points):
         serie = point_data.get(point["id"], {}).get(constellation_name, {}).get("serie_lat_ms", [])
         if not serie:
             continue
+        color = PT_COLORS[i % len(PT_COLORS)]
         figure.add_trace(go.Box(
-            y=serie,
-            name=f"{point['id']} ({point['nombre']})",
-            marker=dict(color=OUTLIER_COLOR, size=5, symbol="circle-open"),
-            line=dict(color=BOX_COLOR, width=1.8),
-            fillcolor=BOX_FILL,
-            median=dict(color=MEDIAN_COLOR, width=2),
-            # Línea de media amarilla punteada
-            boxmean="sd",
-            whiskerwidth=0.5,
+            y=serie, name=f"{point['id']}  {point['nombre']}",
+            marker_color=color, line=dict(color=color),
+            fillcolor=hex_rgba(color, 0.18),
+            boxmean=True, boxpoints="outliers",
         ))
-    figure.update_traces(
-        meanline=dict(visible=True, color=MEAN_COLOR, width=1.8),
-        selector=dict(type="box"),
-    )
-    figure.update_layout(
-        title=dict(
-            text="📦 Distribución de latencia por punto FAE",
-            font=dict(size=13, color="#ffffff", family="sans-serif"),
-            x=0.5, xanchor="center",
-        ),
-        paper_bgcolor="#0a0a0a",
-        plot_bgcolor="#0a0a0a",
-        font=dict(color="#cccccc"),
-        height=420,
-        margin=dict(l=60, r=30, t=60, b=60),
-        showlegend=True,
-        legend=dict(
-            orientation="v", x=1.01, y=1,
-            bgcolor="rgba(0,0,0,0)", font=dict(size=10),
-            itemsizing="constant",
-        ),
-        yaxis=dict(
-            title="Latencia (ms)",
-            gridcolor="#1a1a1a",
-            gridwidth=1,
-            griddash="dot",
-            zeroline=False,
-            tickfont=dict(size=10, color="#aaaaaa"),
-        ),
-        xaxis=dict(
-            gridcolor="#1a1a1a",
-            tickfont=dict(size=10, color="#cccccc"),
-        ),
-    )
-    # Agregar entradas manuales de leyenda para Mediana y Media
-    figure.add_trace(go.Scatter(
-        x=[None], y=[None], mode="lines",
-        line=dict(color=MEDIAN_COLOR, width=2),
-        name="Mediana", showlegend=True,
-    ))
-    figure.add_trace(go.Scatter(
-        x=[None], y=[None], mode="lines",
-        line=dict(color=MEAN_COLOR, width=2, dash="dash"),
-        name="Media", showlegend=True,
-    ))
+    apply_xy_theme(figure, height=400, yaxis_title="Latencia (ms)",
+                   showlegend=False)
     st.plotly_chart(figure, use_container_width=True, config=CHART_CONFIG)

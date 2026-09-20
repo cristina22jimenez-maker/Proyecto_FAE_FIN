@@ -187,15 +187,18 @@ def calcular_nivel3(constelaciones_tles: dict,
                 "icat":         icat,
                 "vis_promedio": round(avg_vis, 1),
                 "lat_promedio": round(avg_lat, 2) if avg_lat else None,
+                "serie_lat_ms": serie_lat,
             }
 
         for p in puntos_fae:
             pid = p["id"]
             serie_vis = serie_vis_punto[pid]
+            serie_lat = serie_lat_punto[pid]
             avg_vis = sum(serie_vis) / max(len(serie_vis), 1)
             resultado["puntos_fae"].setdefault(pid, {})[cname] = {
                 "ica":          calcular_ica(avg_vis),
                 "vis_promedio": round(avg_vis, 1),
+                "serie_lat_ms": serie_lat,
             }
 
     return resultado

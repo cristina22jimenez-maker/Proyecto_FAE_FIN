@@ -7,7 +7,10 @@ from plotly.subplots import make_subplots
 
 from .graph import build_isl, ruta_origen_destino
 from .orbital import haversine
-from .visualization import THEME, THEME_GEO, geo_layout
+from .visualization import (
+    CHART_CONFIG, THEME, apply_geo_theme, colorbar,
+    scattergeo_fae, scattergeo_isl,
+)
 
 
 def render_tab2(sats, constellation, regions, fae_points, metrics, predata,
@@ -62,15 +65,10 @@ def render_tab2(sats, constellation, regions, fae_points, metrics, predata,
         ) < 2800]
         _, edges = build_isl(sats_ec) if constellation["isl"] else ([], [])
         figure = go.Figure()
-        for edge in edges:
-            width = 0.5 + edge.get("w_ms", edge.get("w", 1)) / 5
-            figure.add_trace(go.Scattergeo(
-                lat=[edge["lat_a"], edge["lat_b"], None] if "lat_a" in edge
-                    else [edge["la"], edge["lb"], None],
-                lon=[edge["lon_a"], edge["lon_b"], None] if "lon_a" in edge
-                    else [edge["loa"], edge["lob"], None],
-                mode="lines", line=dict(width=width, color=constellation["color"]),
-                opacity=0.4, showlegend=False,
+        if edges:
+            figure.add_trace(scattergeo_isl(
+                edges, constellation["color"], name="ISL",
+                opacity=0.38, width=0.9,
             ))
         if sats_ec:
             graph = nx.Graph()
@@ -82,27 +80,30 @@ def render_tab2(sats, constellation, regions, fae_points, metrics, predata,
                 if node_a is not None and node_b is not None:
                     graph.add_edge(node_a, node_b)
             degree = dict(graph.degree())
-            sizes = [6 + degree.get(index, 0) * 3 for index in range(len(sats_ec))]
+            names = [sat.get("name", f"SAT-{index:02d}") for index, sat in enumerate(sats_ec)]
             figure.add_trace(go.Scattergeo(
                 lat=[sat["lat"] for sat in sats_ec],
-                lon=[sat["lon"] for sat in sats_ec], mode="markers",
-                marker=dict(size=sizes, color=constellation["color"], opacity=0.8,
-                            line=dict(width=0.5, color="white")),
+                lon=[sat["lon"] for sat in sats_ec],
+                mode="markers",
+                marker=dict(
+                    size=[7 + degree.get(index, 0) * 2.6 for index in range(len(sats_ec))],
+                    color=[degree.get(index, 0) for index in range(len(sats_ec))],
+                    colorscale="Turbo", cmin=0, cmax=max(4, max(degree.values(), default=4)),
+                    colorbar=colorbar("Grado"),
+                    opacity=0.92,
+                    line=dict(width=0.5, color="rgba(255,255,255,0.45)"),
+                ),
                 name="Satélite (tamaño=grado)",
-                hovertemplate="Grado: %{text}<extra></extra>",
-                text=[str(degree.get(index, 0)) for index in range(len(sats_ec))],
+                text=names,
+                customdata=[[degree.get(index, 0), sats_ec[index].get("alt_km", 0)]
+                            for index in range(len(sats_ec))],
+                hovertemplate=("<b>%{text}</b><br>Grado %{customdata[0]}"
+                               "<br>Alt %{customdata[1]:.0f} km<extra></extra>"),
             ))
-        for point in fae_points:
-            figure.add_trace(go.Scattergeo(
-                lat=[point["lat"]], lon=[point["lon"]], mode="markers+text",
-                text=[point["id"]], textposition="top right",
-                textfont=dict(size=11, color="#ff4444"),
-                marker=dict(size=14, color="#ff4444", symbol="triangle-up"),
-                name=point["nombre"], showlegend=False,
-            ))
-        figure.update_layout(**THEME_GEO, geo=geo_layout(), height=420,
-                             margin=dict(l=0, r=0, t=0, b=0))
-        st.plotly_chart(figure, use_container_width=True)
+        for trace in scattergeo_fae(fae_points, showlegend=False):
+            figure.add_trace(trace)
+        apply_geo_theme(figure, height=440)
+        st.plotly_chart(figure, use_container_width=True, config=CHART_CONFIG)
 
     st.markdown("#### 📈 Evolución temporal de métricas del grafo (95 min)")
     if predata and "nivel2" in predata:
@@ -121,18 +122,25 @@ def render_tab2(sats, constellation, regions, fae_points, metrics, predata,
                 values = [item.get(metric_name, 0) for item in series]
                 figure.add_trace(go.Scatter(
                     x=times, y=values, mode="lines", name=cname,
-                    line=dict(color=cfg["color"], width=1.8),
+                    line=dict(color=cfg["color"], width=2),
                     showlegend=(metric_name == "nodos"),
+                    hovertemplate="%{y:.2f} · %{x} min<extra>%{fullData.name}</extra>",
                 ), row=row, col=column)
         figure.update_layout(
             **{k: v for k, v in THEME.items() if k not in ("xaxis", "yaxis")},
-            height=400, margin=dict(l=40, r=10, t=50, b=30),
-            legend=dict(bgcolor="#0d0d0d", bordercolor="#2a2a2a",
+            height=440, margin=dict(l=44, r=16, t=56, b=36),
+            legend=dict(bgcolor="rgba(12,12,12,0.85)", bordercolor="#1e1e1e",
                         font=dict(size=10), orientation="h",
-                        yanchor="bottom", y=1.04, x=0),
+                        yanchor="bottom", y=1.06, x=0),
+            hovermode="x unified",
         )
-        figure.update_xaxes(gridcolor="#1a1a1a", title_text="min")
-        st.plotly_chart(figure, use_container_width=True)
+        figure.update_xaxes(gridcolor="#1a1a1a", title_text="min",
+                            tickfont=dict(color="#888888", size=9),
+                            showspikes=True, spikecolor="#333333")
+        figure.update_yaxes(gridcolor="#1a1a1a",
+                            tickfont=dict(color="#888888", size=9))
+        figure.update_annotations(font=dict(size=11, color="#cccccc"))
+        st.plotly_chart(figure, use_container_width=True, config=CHART_CONFIG)
 
     if ciudades:
         st.divider()

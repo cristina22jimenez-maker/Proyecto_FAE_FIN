@@ -132,13 +132,32 @@ def render_tab1(sats, edges, constellation, regions, fae_points, min_elevation,
         lat_min, lat_max = (min(latencias), max(latencias)) if latencias else (0, 1)
         rango_lat = max(lat_max - lat_min, 1e-6)
 
+        # ── Filtro interactivo por punto de referencia ───────────────────────
+        nombres_puntos = [p["nombre"] for p in fae_points]
+        filtro_punto = st.selectbox(
+            "🔍 Resaltar conexiones de punto:",
+            ["Todos"] + nombres_puntos,
+            key="filtro_punto_bipartite",
+        )
+        punto_seleccionado = (
+            None if filtro_punto == "Todos"
+            else nombres_puntos.index(filtro_punto)
+        )
+
         leyenda_mostrada = set()
         for edge in bipartite_edges:
             sat_index = id_map[edge["si"]]
             point_index = edge["pi"]
-            # Calidad normalizada al rango real de latencias observadas (no al
-            # máximo absoluto), para aprovechar todo el contraste visual.
             calidad = 1 - (edge["ms"] - lat_min) / rango_lat
+
+            # Resaltado: si hay un punto seleccionado, atenuar los demás.
+            if punto_seleccionado is not None and point_index != punto_seleccionado:
+                opacidad = 0.04
+                grosor = 0.4
+            else:
+                opacidad = 0.40 + calidad * 0.60
+                grosor = 1.2 + calidad * 5.5  # más contraste que antes
+
             x_curva, y_curva = _curva_bezier(0.15, sat_y[sat_index], 0.85, point_y[point_index])
             mostrar_leyenda = point_index not in leyenda_mostrada
             leyenda_mostrada.add(point_index)
@@ -147,55 +166,117 @@ def render_tab1(sats, edges, constellation, regions, fae_points, min_elevation,
                 legendgroup=f"punto-{point_index}",
                 showlegend=mostrar_leyenda,
                 name=fae_points[point_index]["nombre"] if mostrar_leyenda else None,
-                opacity=0.25 + calidad * 0.65,
-                line=dict(color=point_colors[point_index % len(point_colors)], width=0.6 + calidad * 3.2),
+                opacity=opacidad,
+                line=dict(color=point_colors[point_index % len(point_colors)], width=grosor),
                 hovertemplate=(f"SAT-{edge['si']:02d} → {fae_points[point_index]['nombre']}<br>"
-                               f"Elevación: {edge['el']}° · Latencia: {edge['ms']} ms<extra></extra>"),
+                               f"Elevación: {edge['el']}° · Latencia: {edge['ms']} ms"
+                               f"<br>Calidad enlace: {calidad*100:.0f}%<extra></extra>"),
             ))
 
         if visible_sats:
+            # Tamaño de nodo satélite proporcional al número de enlaces activos.
+            enlaces_por_sat = [
+                sum(1 for e in bipartite_edges if id_map[e["si"]] == i)
+                for i in range(sat_count)
+            ]
             bipartite.add_trace(go.Scatter(
                 x=[0.15] * sat_count, y=sat_y, mode="markers+text",
-                text=[f"SAT-{index:02d}" for index in range(sat_count)],
-                textposition="middle left", textfont=dict(size=9),
+                text=[f"SAT-{i:02d}" for i in range(sat_count)],
+                textposition="middle left",
+                textfont=dict(
+                    size=9,
+                    # Resaltar etiqueta del sat conectado al punto seleccionado.
+                    color=[
+                        "#00ff88" if punto_seleccionado is not None and any(
+                            id_map[e["si"]] == i and e["pi"] == punto_seleccionado
+                            for e in bipartite_edges
+                        ) else "#ffffff"
+                        for i in range(sat_count)
+                    ],
+                ),
                 name="Satélites", legendgroup="satelites", showlegend=False,
                 marker=dict(
-                    size=9, color=[max_elevation_por_indice.get(i, 25) for i in range(sat_count)],
-                    colorscale="Viridis", cmin=20, cmax=90, showscale=True,
-                    colorbar=dict(title=dict(text="Elev. máx (°)", font=dict(size=10)),
-                                  x=1.12, len=0.75, thickness=14, tickfont=dict(size=9)),
-                    line=dict(width=0.5, color="#ffffff"),
+                    size=[10 + enlaces_por_sat[i] * 2 for i in range(sat_count)],
+                    color=[max_elevation_por_indice.get(i, 25) for i in range(sat_count)],
+                    colorscale="Plasma", cmin=20, cmax=90, showscale=True,
+                    colorbar=dict(
+                        title=dict(text="Elev. máx (°)", font=dict(size=10)),
+                        x=1.12, len=0.75, thickness=14, tickfont=dict(size=9),
+                    ),
+                    line=dict(width=1.2, color="#00ff88"),
+                    symbol="circle",
                 ),
-                customdata=[[sat["lat"], sat["lon"], sat["alt_km"]] for sat in visible_sats],
-                hovertemplate="Lat: %{customdata[0]:.1f}° · Lon: %{customdata[1]:.1f}°<br>Alt: %{customdata[2]:.0f} km<extra></extra>",
+                customdata=[
+                    [sat["lat"], sat["lon"], sat["alt_km"],
+                     max_elevation_por_indice.get(i, 0), enlaces_por_sat[i]]
+                    for i, sat in enumerate(visible_sats)
+                ],
+                hovertemplate=(
+                    "<b>SAT-%{text}</b><br>"
+                    "Lat: %{customdata[0]:.1f}° · Lon: %{customdata[1]:.1f}°<br>"
+                    "Alt: %{customdata[2]:.0f} km<br>"
+                    "Elev. máx: %{customdata[3]:.1f}°<br>"
+                    "Enlaces activos: %{customdata[4]}<extra></extra>"
+                ),
             ))
 
         connections = [sum(edge["pi"] == index for edge in bipartite_edges) for index in range(point_count)]
         bipartite.add_trace(go.Scatter(
             x=[0.85] * point_count, y=point_y, mode="markers+text",
             text=[point["id"] for point in fae_points], textposition="middle right",
-            textfont=dict(size=10), name="Puntos de referencia",
+            textfont=dict(
+                size=11,
+                color=[
+                    "#ffcc00" if punto_seleccionado is not None and i == punto_seleccionado
+                    else "#ffffff"
+                    for i in range(point_count)
+                ],
+            ),
+            name="Puntos de referencia",
             legendgroup="puntos", showlegend=False,
-            marker=dict(size=[14 + 2 * value for value in connections],
-                        color=point_colors[:point_count], symbol="diamond",
-                        line=dict(width=1, color="#ffffff")),
-            customdata=[[connections[index], fae_points[index]["nombre"]] for index in range(point_count)],
-            hovertemplate="%{text}<br>Enlaces: %{customdata[0]}<br>%{customdata[1]}<extra></extra>",
+            marker=dict(
+                size=[16 + 3 * value for value in connections],
+                color=point_colors[:point_count], symbol="diamond",
+                line=dict(
+                    width=[3 if punto_seleccionado is not None and i == punto_seleccionado else 1
+                           for i in range(point_count)],
+                    color="#ffcc00",
+                ),
+            ),
+            customdata=[[connections[i], fae_points[i]["nombre"]] for i in range(point_count)],
+            hovertemplate="<b>%{text}</b><br>%{customdata[1]}<br>Enlaces: %{customdata[0]}<extra></extra>",
         ))
+
+        # Anotación dinámica cuando hay filtro activo.
+        annotations_extra = []
+        if punto_seleccionado is not None:
+            enlaces_activos = sum(1 for e in bipartite_edges if e["pi"] == punto_seleccionado)
+            annotations_extra.append(dict(
+                x=0.5, y=-0.06,
+                text=f"● Mostrando {enlaces_activos} enlace(s) hacia {filtro_punto}",
+                showarrow=False,
+                font=dict(size=10, color="#ffcc00"),
+                xref="paper", yref="paper",
+            ))
+
         bipartite.update_layout(
-            height=max(400, min(700, sat_count * 24 + 100)),
+            height=max(420, min(720, sat_count * 26 + 120)),
             paper_bgcolor="#000000", plot_bgcolor="#050505",
             font=dict(color="#ffffff", family="Courier New, monospace"),
-            margin=dict(l=80, r=140, t=35, b=20),
+            margin=dict(l=80, r=150, t=50, b=40),
             xaxis=dict(visible=False, range=[0, 1.25]),
             yaxis=dict(visible=False, range=[-0.05, 1.05]),
+            hoverdistance=18,
+            hovermode="closest",
             legend=dict(bgcolor="#0d0d0d", bordercolor="#2a2a2a", font=dict(size=9),
-                        orientation="h", yanchor="bottom", y=1.06, x=0,
+                        orientation="h", yanchor="bottom", y=1.08, x=0,
                         title=dict(text="Punto → color de arista  ")),
             annotations=[
-                dict(x=0.15, y=1.13, text="SATÉLITES (ordenados por elevación máx.)", showarrow=False, font=dict(size=10)),
-                dict(x=0.85, y=1.13, text="PUNTOS DE REFERENCIA", showarrow=False, font=dict(size=10)),
-            ],
+                dict(x=0.15, y=1.15, text="SATÉLITES (tamaño = enlaces · color = elevación)",
+                     showarrow=False, font=dict(size=10, color="#aaaaaa")),
+                dict(x=0.85, y=1.15, text="PUNTOS DE REFERENCIA",
+                     showarrow=False, font=dict(size=10, color="#aaaaaa")),
+            ] + annotations_extra,
         )
         st.plotly_chart(bipartite, use_container_width=True, config=CHART_CONFIG)
         st.caption(f"Aristas: {len(bipartite_edges)} · Satélites: {len(visible_sats)} · Desplazamiento: {time_offset} min · "

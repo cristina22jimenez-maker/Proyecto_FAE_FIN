@@ -36,6 +36,8 @@ from .visualization import (
     THEME,
     THEME_GEO,
     LEGEND_STYLE,
+    CHART_CONFIG,
+    ICA_COLORSCALE,
     COLOR_STARLINK,
     COLOR_ONEWEB,
     COLOR_KUIPER,
@@ -72,6 +74,7 @@ __all__ = [
     "ICA_UMBRAL_SATS","ICAT_LAT_REF_MS",
     # visualization
     "geo_layout","hex_rgba","THEME","THEME_GEO","LEGEND_STYLE",
+    "CHART_CONFIG","ICA_COLORSCALE",
     "COLOR_STARLINK","COLOR_ONEWEB","COLOR_KUIPER","PT_COLORS","PT_SYMBOLS",
     # config/data
     "CONSTELACIONES","PUNTOS_FAE","REGIONES","TIME_STEPS","MODO_HISTORICO",
